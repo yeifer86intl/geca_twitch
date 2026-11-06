@@ -1,6 +1,13 @@
 __pycache__/
-*.pyc
+.pytest_cache/
+*.py[cod]
 .env
-state/
-salida_twitch/
+.env.*
+!.env.example
+*.db
+*.db-*
 *.sqlite
+*.sqlite3
+outputs/
+state/
+.venv/
