@@ -1,0 +1,75 @@
+name: GECA Twitch - cada 4 horas
+
+on:
+  schedule:
+    # UTC 00:17 04:17 08:17 12:17 16:17 20:17
+    # Caracas UTC-4: 20:17 00:17 04:17 08:17 12:17 16:17
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: geca-twitch-state
+  cancel-in-progress: false
+
+jobs:
+  twitch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+      TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Dependencias
+        run: python -m pip install -r requirements.txt
+      - name: Recuperar ultima base de datos
+        run: bash scripts/restore_state.sh
+      - name: Capturar Twitch
+        shell: bash
+        run: |
+          mkdir -p state salida_twitch
+          EXTRA_ARGS=()
+          # Matching completo una vez al dia (00 UTC), o en la primera ejecucion.
+          # En el resto de las ejecuciones se reutilizan las coincidencias.
+          if [[ "$(date -u +%H)" != "00" && -s state/geca_twitch.sqlite ]]; then
+            EXTRA_ARGS+=(--skip-matching)
+          fi
+          python twitch_geca.py \
+            --steam steam_maestro_20261103.csv \
+            --db state/geca_twitch.sqlite \
+            --out salida_twitch \
+            --top-games 100 \
+            --max-capture-games 150 \
+            --max-streams 500 \
+            --max-videos 10 \
+            --max-clips 10 \
+            "${EXTRA_ARGS[@]}"
+      - name: Guardar base persistente para siguiente ejecucion
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twitch-state
+          path: state/geca_twitch.sqlite
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Descargar resultados CSV del run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twitch-resultados
+          path: salida_twitch/
+          if-no-files-found: warn
+          retention-days: 30
