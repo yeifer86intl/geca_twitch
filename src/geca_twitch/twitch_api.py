@@ -48,12 +48,12 @@ class TwitchAPI:
             return r.json()
         raise RuntimeError('Se agotaron los reintentos de Helix')
 
-    def pages(self, endpoint, params, max_rows):
+    def pages(self, endpoint, params, max_rows=None):
         """Devuelve (filas, exhaustivo). False si se alcanzó el límite de filas."""
         rows, cursor, seen = [], None, set()
-        while len(rows) < max_rows:
+        while max_rows is None or len(rows) < max_rows:
             p = dict(params)
-            p['first'] = min(100, max_rows-len(rows))
+            p['first'] = 100 if max_rows is None else min(100, max_rows-len(rows))
             if cursor: p['after'] = cursor
             body = self.get(endpoint, p)
             batch = body.get('data', [])

@@ -1,103 +1,143 @@
-# GECA Twitch — Ingesta transaccional + métricas + GitHub Actions
+# GECA Radar · Twitch transaccional v2
 
-Proyecto alineado con `GECA_RADAR_PRESENTACION_EJECUTIVA`:
+Proyecto de ingesta y métricas conforme al PDF **GECA / MediaPro – Radar / La decisión (19 oct 2026)**.
 
-- Steam da el catálogo; se resuelve la identidad de Twitch **por nombre**, nunca por igualdad de IDs.
-- Se conserva evidencia de Twitch con fecha, identificador y alcance de la consulta.
-- Se separa RAW transaccional de agregados y alertas.
-- La alerta `suba de atención` exige **14 días UTC completos**, seis franjas de 4 horas sin huecos, streams exhaustivos, promedio previo >0, aumento >=500 espectadores y >=50%.
-- El radar propone señales: la decisión editorial pertenece al analista.
+**Sin descarga de videos, sin transcripción de audio, sin LLM y sin análisis de comentarios de Twitch.** Se almacenan las URL públicas que la API devuelva, como referencias para posibles análisis autorizados futuros. El indicador de reseñas de Steam no es sentimiento de Twitch.
 
-## Carpetas
+## Arquitectura y metodología
 
-```
-.github/workflows/geca-twitch.yml  # programador GitHub Actions cada 4 horas
-src/geca_twitch/twitch_api.py       # cliente Twitch Helix y OAuth
-src/geca_twitch/db.py               # esquema SQLite
-src/geca_twitch/ingest.py           # Steam -> matching -> Twitch -> RAW
-src/geca_twitch/aggregate.py        # GOLD, alertas y CSV
-scripts/restore_latest_artifact.py  # restaura histórico SQLite de artifacts
- data/steam_maestro_20261103.csv    # catálogo incluido, corte histórico
- tests/test_pipeline.py             # pruebas sin conexión
-```
+1. **Identificar:** leer catálogo Steam; buscar coincidencias exactas en Helix y sugerir candidatos de similitud para revisión; almacenar categorías principales de Twitch incluso si no aparecen en Steam. IGDB ID se conserva cuando Twitch lo devuelve, pero NO se equipara automáticamente a un AppID de Steam.
+2. **Evidencia:** guardar snapshots por transmisión, por juego, videos, clips, observaciones de visualizaciones, timestamps y JSON fuente; conservar URLs del contenido sin descargarlo.
+3. **Reglas del PDF:** (a) Steam: próximo lanzamiento con ficha verificada dentro de 7 días; (b) Twitch: 14 días UTC completos, 6 franjas por día, captura de streams completa y audiencia previa >0; diferencia >=500 espectadores **y** >=50%.
+4. **Resumen:** generar de 0 a 3 propuestas, priorizando señales Twitch y después lanzamientos Steam; este orden de desempate es una decisión técnica configurable, no un requisito del PDF.
+5. **Analista:** registrar manualmente `analizar`, `seguir`, `descartar`, `posponer` con fecha, nota y responsable.
 
-## Instalación en GitHub
+## Base de datos
 
-1. Copia el contenido de **esta carpeta** a la raíz del repo (conservando `.github/workflows`). No subas el ZIP cerrado como único archivo.
-2. En el repo GitHub: **Settings → Secrets and variables → Actions → New repository secret**. Crea `TWITCH_CLIENT_ID` y `TWITCH_CLIENT_SECRET`.
-3. **Revoca/regenera el client secret previamente compartido en un chat** antes de usarlo en GitHub.
-4. Haz `git add .`, `git commit -m "GECA Twitch transaccional"`, `git push origin main`.
-5. En **Actions → GECA Twitch - transaccional cada 4 horas → Run workflow**, ejecuta la primera prueba manual.
-6. Abre cada run: revisa logs y descarga artifacts `geca-twitch-state` y `geca-twitch-exports`.
+**16 tablas**: 13 originales + `attention_evaluations`, `editorial_proposals`, `editorial_decisions`.
 
-### GitHub Actions
+Las tablas originales son `steam_games`, `twitch_games`, `game_matches`, `match_candidates`, `runs`, `stream_snapshots`, `game_snapshots`, `twitch_videos`, `video_observations`, `twitch_clips`, `clip_observations`, `daily_metrics` y `attention_alerts`.
 
-`17 */4 * * *` UTC corresponde a 00:17, 04:17, 08:17, 12:17, 16:17 y 20:17 en Venezuela (UTC-4). GitHub puede retrasar u omitir ejecuciones de cron. **La regla de alerta no inventa observaciones faltantes** y puede quedar inhabilitada si falta una franja.
+Las nuevas agregan: auditoría para juegos no evaluables (con motivo), propuestas justificadas y registro humano de decisiones. Las tablas existentes reciben migraciones **aditivas** al abrir la base:
 
-El job tiene `concurrency` no cancelable y permiso `actions: read`. Descarga la última copia SQLite como artifact y sube el estado actualizado **incluso cuando falla la ingesta**, para evitar perder avances del lote. Los artifacts están configurados con `retention-days: 30`. Eso **NO es almacenamiento garantizado permanente**: para uso productivo migra RAW a PostgreSQL/objeto persistente y define una política de retención, backups y eliminación conforme a permisos Twitch.
+- `twitch_games`: `igdb_id`.
+- `stream_snapshots`: `user_login`, `tags_json`, `thumbnail_url`, `is_mature`.
+- `twitch_videos`: `user_name`, `stream_id`, `thumbnail_url`, `viewable`.
+- `twitch_clips`: `creator_name`, `broadcaster_name`, `video_id`, `vod_offset`, `is_featured`, `thumbnail_url`.
 
-### Control de volumen y cobertura
+Se conservan `payload_json`, URL de videos, URL de clips y mediciones posteriores. **Sin análisis multimedia.**
 
-El archivo YAML define:
-- `--tracked-limit 120`: cohorte estable priorizada para acumular seis capturas diarias. **No equivale al catálogo completo**; actualmente se escoge por ID de Twitch.
-- `--rotation-limit 30`: hasta 30 categorías adicionales rotan cada ejecución para exploración, pero **generalmente no cumplen las 14 jornadas completas**.
-- `--fuzzy-limit 20`: búsquedas aproximadas pendientes por ejecución; los matches exactos del catálogo se consultan por lotes de hasta 100.
-- `--max-streams 300`, `--max-videos 100`, `--max-clips 100`: topes por juego y ejecución; pueden impedir cobertura completa. En particular, `streams_complete=0` invalida ese día para alertas.
-- `--discover-limit 100`: categorías top de Twitch, conservadas aunque no coincidan con Steam.
+## Requisitos y configuración local
 
-Los datos de clips consultan una ventana solapada de 8 horas. Como Twitch ordena clips principalmente por vistas y tiene límites de paginación, **esto no garantiza encontrar todos los clips**. Los videos de un juego también tienen límites de recuperación en Twitch. No se deben usar los conteos para afirmar cobertura exhaustiva.
-
-El catálogo de Steam incluido está fechado `2026-11-03`. **Actualiza ese CSV** en `data/` o modifica el argumento `--steam` para apuntar al `maestro.csv` nuevo producido por tu pipeline Steam. Esta integración no descarga por sí misma los artifacts de Steam de otro workflow.
-
-## Ejecución local (PowerShell de Windows)
-
-Desde la raíz del proyecto:
+En PowerShell con Anaconda:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-$env:TWITCH_CLIENT_ID="TU_NUEVO_CLIENT_ID"
-$env:TWITCH_CLIENT_SECRET="TU_NUEVO_CLIENT_SECRET"
-$env:PYTHONPATH="src"
+conda create -n geca-twitch python=3.12 -y
+conda activate geca-twitch
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Edita `.env` e introduce tus credenciales de Twitch **renovadas**. Nunca subas `.env` al repositorio (ya está en `.gitignore`). Este proyecto carga `.env` automáticamente en la ingesta local; GitHub Actions inyecta Secrets sin crear `.env`.
+
+```powershell
+$env:PYTHONPATH = 'src'
+python -m unittest discover -s tests -v
 python -m geca_twitch.ingest --steam data/steam_maestro_20261103.csv --db state/geca_twitch.sqlite3
 python -m geca_twitch.aggregate --db state/geca_twitch.sqlite3 --out outputs
 ```
 
-GitHub Actions usa Linux, no requiere activar entornos virtuales ni definir PYTHONPATH manualmente porque el YAML ya lo hace.
+No necesitas credenciales para volver a calcular agregados ni para usar `notebooks/explorar_geca_twitch.ipynb`.
 
-Para probar sin red:
+**Importante:** el catálogo incluido `steam_maestro_20261103.csv` es un corte histórico. Para detectar lanzamientos nuevos debes actualizarlo con las salidas de Steam y asegurarte de que `ficha_verificada_utc` refleje una verificación real de los últimos siete días. El pipeline no recalcula por sí solo las fechas de verificación de Steam. Valores sin fecha exacta no activan esa regla.
+
+### Decisión editorial manual
+
+Consultar `outputs/editorial_proposals.csv`, tomar su `proposal_day` y `game_key`, y ejecutar:
 
 ```powershell
-$env:PYTHONPATH="src"
-python -m unittest discover -s tests -v
+python -m geca_twitch.decide --day 2026-11-09 --game-key steam:123456 --decision seguir --analyst analista --note 'Revisar ficha actualizada'
+python -m geca_twitch.aggregate --db state/geca_twitch.sqlite3 --out outputs
 ```
 
-## Tablas RAW
+El ejemplo usa un ID ficticio. `decide` solo permite actuar sobre una propuesta existente. La decisión manual se guarda en el SQLite, **no se sincroniza automáticamente desde tu PC a GitHub**. Si deseas que sea persistente en producción, registra decisiones sobre la base de referencia mediante una interfaz o servicio de escritura autorizado.
 
-- `steam_games`: campos originales Steam + contadores de reseñas de **Steam**.
-- `twitch_games`: categorías encontradas en Helix.
-- `game_matches`: asociación Steam–Twitch y estado `matched|ambiguous|unmatched`.
-- `match_candidates`: candidatos de búsqueda aproximada con puntuación.
-- `stream_snapshots`: fila por stream/captura, con `viewer_count` y JSON de origen.
-- `game_snapshots`: total de espectadores observados por juego/captura y flag de exhaustividad.
-- `twitch_videos`, `video_observations`: metadatos únicos y mediciones periódicas de vistas.
-- `twitch_clips`, `clip_observations`: metadatos únicos y mediciones periódicas de vistas.
-- `runs`: auditoría, errores, fecha y conteos por ejecución.
+## GitHub Actions cada cuatro horas
 
-Los datos de espectadores son **instantáneos de transmisiones recuperadas**, NO espectadores únicos ni tiempo total visto.
+Workflow: `.github/workflows/geca-twitch.yml`. Programa `17 */4 * * *` (UTC), seis veces diarias. Ejecuta pruebas, restaura la SQLite más reciente de artifacts, ingesta, agregados y publica artifacts `geca-twitch-state` y `geca-twitch-exports`. GitHub puede demorar/omitir algunos disparos del cron: no se promete cobertura de 6/6.
 
-## Salidas CSV
+En GitHub: **Settings → Secrets and variables → Actions**, definir `TWITCH_CLIENT_ID` y `TWITCH_CLIENT_SECRET`. Usa un secreto nuevo: el antiguo fue compartido en la conversación. No es necesario subir `.env`.
 
-`outputs/steam_twitch_matches.csv`, `twitch_only.csv`, `game_metrics_daily.csv`, `attention_alerts.csv`, `steam_reception.csv`, `runs.csv`.
+El repositorio debe contener `.github/workflows/geca-twitch.yml` y ejecutarse desde su raíz. Tras hacer push a `main`, prueba desde Actions → Run workflow.
 
-`steam_reception.csv` solo contiene los recuentos positivos/negativos que ya vienen del CSV de Steam. **No hay acceso general al historial de chat de Twitch mediante Helix**; no se presenta sentimiento de Twitch porque todavía no existen mensajes capturados. Como futura extensión, usar EventSub con autorización, servidor persistente y cumplimiento de reglas Twitch para mensajes de chat. Tampoco se usa sentimiento de títulos de streams como sustituto de opiniones de jugadores.
+**Respaldo:** un artifact con retención de 30 días no es una base de datos gestionada ni una garantía de persistencia indefinida. Si el artifact caduca o se pierde, el pipeline puede iniciar con una base vacía; para producción necesitarás PostgreSQL o almacenamiento persistente + copias de seguridad. No abras a escritura el mismo SQLite en varios procesos simultáneos.
 
-## Limitaciones de esta versión
+## Archivos exportados
 
-- SQLite se transporta por artifacts: uso piloto, no despliegue definitivo de base transaccional.
-- Los límites por juego y la rotación hacen que haya cobertura parcial. Un día sin las seis franjas o un corte en streams invalida la alerta.
-- Para cientos/miles de juegos activos y 6 corridas diarias, conviene PostgreSQL, colas y almacenamiento de objetos; medir cuota y duración del workflow.
-- Matching aproximado con puntuación >=0.95 y margen de 0.10 es heurístico. Para franquicias/remasters, revisa `ambiguous` antes de usar el juego en reglas editoriales.
-- La regla de `Juego a lanzarse` del PDF (Steam próximos lanzamientos y ficha verificada últimos 7 días) se conserva conceptualmente en el catálogo, pero **esta versión de Twitch no genera todavía propuestas de lanzamiento** ni la cola humana; debe integrarse con el pipeline Steam existente.
-- No se ha ejecutado una descarga real de Twitch desde este entorno; es necesaria una prueba de Actions con credenciales válidas.
+- `steam_twitch_matches.csv`: claves y matching, con IGDB ID cuando exista.
+- `twitch_only.csv`: categorías Twitch sin `matched` confirmado; **no** prueba que no existan en Steam.
+- `game_metrics_daily.csv`: 6 métricas + cobertura y contadores diarios.
+- `attention_evaluations.csv`: incluye `reason` para explicar por qué no es evaluable.
+- `attention_alerts.csv`: solo juegos que cumplen la regla.
+- `editorial_proposals.csv`, `editorial_decisions.csv`: cola y trazabilidad editorial.
+- `twitch_video_links.csv`, `twitch_clip_links.csv`: URLs y metadatos **sin archivos multimedia**.
+- `steam_reception.csv`: reseñas de Steam, separadas del sentimiento Twitch.
+- `runs.csv`: auditoría de ingestas.
+
+## Alcances y limitaciones
+
+- 120 juegos se mantienen como cohorte estable y 30 rotan por defecto. Esos 30 no tendrán normalmente 14 días completos para activar alertas.
+- Los contadores de videos/clips se recuperan sujetos a límites y paginación; las cantidades no son un censo total de Twitch.
+- `avg_viewers` es un promedio de **snapshots observados**, no audiencia única, ni horas vistas exactas.
+- La regla de cobertura exige seis franjas distintas UTC por cada uno de 14 días. Un retraso de GitHub puede hacer un día no evaluable. La validez del alcance depende además de mantener los mismos límites de extracción y el mismo conjunto de juegos.
+- `attention_evaluations.reason` permite auditar `missing_day`, `incomplete_streams`, `missing_or_duplicate_slot`, `zero_previous_average`, `threshold_not_met`.
+- `editorial_proposals` genera hasta tres propuestas por ejecución, no rankings de popularidad. El estado `pending` se recalcula, pero decisiones previas se conservan.
+- El proyecto **no** descarga videos, no transcribe, no ejecuta LLM, no procesa mensajes de chat y no crea porcentajes positivos/negativos de Twitch.
+
+Documentación: https://dev.twitch.tv/docs/api/reference/ y https://docs.github.com/en/actions
+
+
+## v2.1: cobertura completa del maestro (sin rotación)
+
+**Objetivo:** cada ejecución intenta obtener una medición de todos los juegos
+con correspondencia **confirmada** en Twitch del maestro Steam completo.
+No hay `tracked-limit=120`, ni `rotation-limit=30`, ni `fuzzy-limit=20`.
+Los nombres pendientes se buscan sin recorte artificial durante la primera ingesta.
+Los no encontrados y ambiguos se conservan en la base, y **no se inventa** un ID Twitch.
+
+El archivo `outputs/steam_catalog_coverage.csv` incluye **una fila por cada juego Steam**,
+con `match_status`, `monitoring_status`, fecha de última captura y número de capturas.
+Comparar sus filas contra `steam_games` antes de dar por concluida una ejecución.
+
+El workflow utiliza `scripts/select_steam_master.py`. Prioridad:
+1. `STEAM_CATALOG` si se suministra mediante variable de entorno.
+2. `data/maestro.csv` si existe.
+3. El archivo `data/steam_maestro_*.csv` de mayor fecha en su nombre.
+
+Esto **no descarga** automáticamente un maestro generado en otro repositorio o workflow.
+Para datos recientes, copiar el maestro actualizado a `data/maestro.csv` antes de ejecutar
+GitHub Actions o crear una integración explícita con su fuente.
+
+Por defecto los streams y clips **no** tienen máximo local de filas y se recorren sus páginas;
+los videos mantienen el límite de Twitch (~500 resultados por juego mediante `/videos?game_id`).
+`--discover-limit 0` desactiva solo el descubrimiento **extra** de categorías populares,
+no la búsqueda de juegos del maestro. El crecimiento del catálogo puede hacer que la
+extracción total supere las cuatro horas: GitHub puede retrasar o serializar trabajos.
+El timeout del job se elevó a 330 minutos; NO garantiza completar toda la lista en
+una sola ejecución. Revisar `runs.csv`, `steam_catalog_coverage.csv` y logs. Los juegos
+con coincidencia ambigua o no encontrados requieren resolución de identidad.
+
+No se descargan ni se transcriben videos. Se guardan URLs, metadatos y vistas
+observadas; no se infiere el sentimiento de Twitch.
+
+### Ejecución local en PowerShell (Anaconda)
+
+```powershell
+conda activate geca-twitch
+$env:PYTHONPATH = 'src'
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+$steam = python scripts/select_steam_master.py
+python -m geca_twitch.ingest --steam $steam --db state/geca_twitch.sqlite3 --discover-limit 0 --max-videos 500
+python -m geca_twitch.aggregate --db state/geca_twitch.sqlite3 --out outputs
+```

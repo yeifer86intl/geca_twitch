@@ -2,7 +2,7 @@ name: GECA Twitch - transaccional cada 4 horas
 
 on:
   schedule:
-    - cron: '17 */4 * * *'  # UTC: Venezuela 00:17, 04:17, 08:17, 12:17, 16:17, 20:17
+    - cron: '17 */4 * * *' # UTC; Venezuela 20:17 (día anterior), 00:17, 04:17, 08:17, 12:17, 16:17
   workflow_dispatch:
 
 permissions:
@@ -16,34 +16,45 @@ concurrency:
 jobs:
   ingesta-y-agregados:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 330
     env:
       TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
       GH_TOKEN: ${{ github.token }}
+      PYTHONPATH: src
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
       - name: Dependencias
         run: python -m pip install -r requirements.txt
-      - name: Recuperar ultimo SQLite
+      - name: Pruebas unitarias
+        run: python -m unittest discover -s tests -v
+      - name: Validar secretos
+        run: |
+          python -c "import os,sys; sys.exit(0 if os.getenv('TWITCH_CLIENT_ID') and os.getenv('TWITCH_CLIENT_SECRET') else 1)"
+      - name: Recuperar último SQLite
         run: python scripts/restore_latest_artifact.py
       - name: Ingesta transaccional Steam/Twitch
-        id: ingestion
         run: |
-          PYTHONPATH=src python -m geca_twitch.ingest \
-            --steam data/steam_maestro_20261103.csv \
+          STEAM_FILE="$(python scripts/select_steam_master.py)"
+          echo "Maestro seleccionado: $STEAM_FILE"
+          python -m geca_twitch.ingest \
+            --steam "$STEAM_FILE" \
             --db state/geca_twitch.sqlite3 \
-            --tracked-limit 120 --rotation-limit 30 \
-            --fuzzy-limit 20 --discover-limit 100 \
-            --max-streams 300 --max-videos 100 --max-clips 100
-      - name: Agregados diarios, alertas y exportaciones
+            --discover-limit 0 \
+            --max-videos 500 --clip-hours 8
+      - name: Agregados, evaluación y exportaciones
         if: always()
-        run: PYTHONPATH=src python -m geca_twitch.aggregate --db state/geca_twitch.sqlite3 --out outputs
-      - name: Guardar estado histórico
+        run: |
+          if [ -f state/geca_twitch.sqlite3 ]; then
+            python -m geca_twitch.aggregate --db state/geca_twitch.sqlite3 --out outputs
+          fi
+      - name: Guardar SQLite histórico
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -51,7 +62,7 @@ jobs:
           path: state/geca_twitch.sqlite3
           if-no-files-found: warn
           retention-days: 30
-      - name: Archivos analíticos
+      - name: Guardar reportes CSV
         if: always()
         uses: actions/upload-artifact@v4
         with:

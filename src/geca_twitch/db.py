@@ -74,6 +74,24 @@ CREATE TABLE IF NOT EXISTS attention_alerts (
  growth_pct REAL NOT NULL, eligible INTEGER NOT NULL,
  PRIMARY KEY(evaluated_utc_day,twitch_game_id)
 );
+CREATE TABLE IF NOT EXISTS attention_evaluations (
+ evaluated_utc_day TEXT NOT NULL, twitch_game_id TEXT NOT NULL,
+ prior_avg REAL, recent_avg REAL, delta_viewers REAL, growth_pct REAL,
+ eligible INTEGER NOT NULL, alerted INTEGER NOT NULL, reason TEXT NOT NULL,
+ days_valid INTEGER NOT NULL, checked_utc TEXT NOT NULL,
+ PRIMARY KEY(evaluated_utc_day,twitch_game_id)
+);
+CREATE TABLE IF NOT EXISTS editorial_proposals (
+ proposal_day TEXT NOT NULL, game_key TEXT NOT NULL, game_name TEXT NOT NULL, rule TEXT NOT NULL,
+ evidence_json TEXT NOT NULL, question TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+ created_utc TEXT NOT NULL, PRIMARY KEY(proposal_day,game_key,rule)
+);
+CREATE TABLE IF NOT EXISTS editorial_decisions (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, proposal_day TEXT NOT NULL,
+ game_key TEXT NOT NULL, decision TEXT NOT NULL, note TEXT,
+ decided_by TEXT, decided_utc TEXT NOT NULL,
+ CHECK(decision IN ('analizar','seguir','descartar','posponer'))
+);
 CREATE INDEX IF NOT EXISTS idx_game_snapshots_time ON game_snapshots(twitch_game_id,captured_utc);
 CREATE INDEX IF NOT EXISTS idx_videos_game ON twitch_videos(twitch_game_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_clips_game ON twitch_clips(twitch_game_id,created_at);
@@ -86,6 +104,19 @@ def connect(path):
     c.row_factory = sqlite3.Row
     c.execute('PRAGMA busy_timeout=60000')
     c.executescript(DDL)
+    # Migraciones aditivas: conserva las bases SQLite de versiones anteriores.
+    additions = {
+      'twitch_games': {'igdb_id': 'TEXT'},
+      'stream_snapshots': {'user_login':'TEXT','tags_json':'TEXT','thumbnail_url':'TEXT','is_mature':'INTEGER'},
+      'twitch_videos': {'user_name':'TEXT','stream_id':'TEXT','thumbnail_url':'TEXT','viewable':'TEXT'},
+      'twitch_clips': {'creator_name':'TEXT','broadcaster_name':'TEXT','video_id':'TEXT',
+                       'vod_offset':'INTEGER','is_featured':'INTEGER','thumbnail_url':'TEXT'},
+    }
+    for table, fields in additions.items():
+        existing = {r['name'] for r in c.execute(f'PRAGMA table_info({table})')}
+        for field, sqltype in fields.items():
+            if field not in existing:
+                c.execute(f'ALTER TABLE {table} ADD COLUMN {field} {sqltype}')
     c.commit()
     return c
 
