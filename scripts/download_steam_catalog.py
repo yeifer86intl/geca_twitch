@@ -8,11 +8,30 @@ def run(repo, out, result_csv):
     token=os.environ.get('STEAM_GH_TOKEN','')
     if not token: raise RuntimeError('Configura STEAM_GH_TOKEN con acceso Actions:read al repositorio Steam')
     environment={**os.environ,'GH_TOKEN':token}
-    q=subprocess.run(['gh','run','list','--repo',repo,'--workflow','radar.yml',
-       '--status','success','--limit','20','--json','databaseId'],
-       capture_output=True,text=True,env=environment,check=True)
+    cmd = ['gh', 'run', 'list', '--repo', repo, '--workflow', 'radar.yml',
+           '--status', 'success', '--limit', '20', '--json', 'databaseId']
+    q = subprocess.run(cmd, capture_output=True, text=True, env=environment)
+    if q.returncode != 0:
+        # No imprimir las variables de entorno ni el token en los registros.
+        mensaje = (q.stderr or q.stdout or 'GitHub CLI no devolvió detalles').strip()
+        mensaje = mensaje.replace(token, '[TOKEN_OCULTO]')
+        raise RuntimeError(
+            'No se pudo consultar el workflow radar.yml en ' + repo + '\n'
+            + 'Respuesta de GitHub:\n' + mensaje + '\n'
+            + 'Comprueba: (1) permiso Actions: Read del token sobre geca-radar; '
+            + '(2) que exista .github/workflows/radar.yml; '
+            + '(3) que el token esté activo y autorizado.'
+        )
+
     dest=pathlib.Path(out);dest.parent.mkdir(parents=True,exist_ok=True)
-    for item in json.loads(q.stdout):
+    try:
+        runs = json.loads(q.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError('GitHub devolvió un listado de ejecuciones no válido') from exc
+    if not runs:
+        raise RuntimeError('No hay ejecuciones exitosas de radar.yml en las últimas 20 consultadas')
+    ultimo_error = ''
+    for item in runs:
         target=dest.parent/'downloaded_steam'
         target.mkdir(exist_ok=True)
         for file in target.iterdir():
@@ -21,7 +40,10 @@ def run(repo, out, result_csv):
             '--repo',repo,'-n','geca-steam-catalog','-D',str(target)],
             env=environment,capture_output=True,text=True)
         source=target/'geca_steam_historico.xlsx'
-        if result.returncode!=0 or not source.is_file():continue
+        if result.returncode != 0 or not source.is_file():
+            ultimo_error = (result.stderr or result.stdout or 'Artifact ausente').strip()
+            ultimo_error = ultimo_error.replace(token, '[TOKEN_OCULTO]')
+            continue
         sheet=pd.read_excel(source,sheet_name='vigente',dtype={'appid':str})
         necessary={'appid','nombre','lanzamiento','ficha_verificada_utc'}
         if not necessary.issubset(sheet.columns):raise ValueError('Libro Steam sin columnas obligatorias')
@@ -36,7 +58,10 @@ def run(repo, out, result_csv):
         sheet[keep].to_csv(result_csv,sep=';',index=False,encoding='utf-8-sig')
         print('Catálogo importado:',len(sheet),'AppID. Run:',item['databaseId'])
         return
-    raise RuntimeError('No se encontró el artifact geca-steam-catalog válido: no usar un CSV antiguo')
+    raise RuntimeError(
+        'No se encontró el artifact geca-steam-catalog válido en las ejecuciones consultadas. '
+        'No se usará un CSV antiguo. Detalle del último intento: ' + ultimo_error
+    )
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--repo',required=True)
