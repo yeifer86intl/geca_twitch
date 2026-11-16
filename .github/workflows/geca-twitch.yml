@@ -2,7 +2,7 @@ name: GECA Twitch - extracción diaria
 
 on:
   schedule:
-    - cron: '17 12 * * *' # 12:17 UTC = 08:17 Venezuela (UTC-4)
+    - cron: '17 12 * * *' # 08:17 Venezuela (UTC-4)
   workflow_dispatch:
 
 permissions:
@@ -23,41 +23,75 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PYTHONPATH: src
       STEAM_GH_TOKEN: ${{ secrets.STEAM_GH_TOKEN }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
-      - name: Dependencias
+
+      - name: Instalar dependencias
         run: python -m pip install -r requirements.txt
-      - name: Pruebas unitarias
+
+      - name: Ejecutar pruebas unitarias
         run: python -m unittest discover -s tests -v
-      - name: Validar secretos
+
+      - name: Validar credenciales
+        shell: bash
         run: |
-          python -c "import os,sys; sys.exit(0 if os.getenv('TWITCH_CLIENT_ID') and os.getenv('TWITCH_CLIENT_SECRET') else 1)"
-      - name: Recuperar último SQLite
+          python - <<'PY'
+          import os
+          missing = [name for name in ('TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'STEAM_GH_TOKEN') if not os.getenv(name)]
+          if missing:
+              raise SystemExit('Faltan secretos de Actions: ' + ', '.join(missing))
+          print('Las tres credenciales están configuradas (valores ocultos).')
+          PY
+
+      - name: Recuperar último SQLite de Twitch
         run: python scripts/restore_latest_artifact.py
-      - name: Descargar maestro histórico actualizado de Steam
-        run: python scripts/download_steam_catalog.py --repo yeifer86intl/geca-radar --out data/geca_steam_historico.xlsx --csv data/steam_maestro_actual.csv
-      - name: Ingesta transaccional Steam/Twitch
+
+      - name: Comprobar acceso de Twitch al repositorio Steam
+        env:
+          GH_TOKEN: ${{ secrets.STEAM_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.STEAM_GH_TOKEN }}
+        shell: bash
         run: |
-          STEAM_FILE="data/steam_maestro_actual.csv"
-          echo "Maestro seleccionado: $STEAM_FILE"
+          echo 'Comprobando acceso a los workflows de Steam (sin mostrar credenciales)...'
+          gh api 'repos/yeifer86intl/geca-radar/actions/workflows?per_page=100' \
+            --jq '.workflows[] | [.id, .name, .path] | @tsv'
+
+      - name: Descargar catálogo histórico de Steam
+        env:
+          GH_TOKEN: ${{ secrets.STEAM_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.STEAM_GH_TOKEN }}
+        run: |
+          python scripts/download_steam_catalog.py \
+            --repo yeifer86intl/geca-radar \
+            --out data/geca_steam_historico.xlsx \
+            --csv data/steam_maestro_actual.csv
+
+      - name: Ingesta transaccional Steam y Twitch
+        run: |
           python -m geca_twitch.ingest \
-            --steam "$STEAM_FILE" \
+            --steam data/steam_maestro_actual.csv \
             --db state/geca_twitch.sqlite3 \
             --discover-limit 0 \
-            --max-videos 500 --clip-hours 8
-      - name: Agregados, evaluación y exportaciones
+            --max-videos 500 \
+            --clip-hours 8
+
+      - name: Calcular agregados y alertas diarias
         if: always()
+        shell: bash
         run: |
           if [ -f state/geca_twitch.sqlite3 ]; then
             python -m geca_twitch.aggregate --db state/geca_twitch.sqlite3 --out outputs
           fi
-      - name: Guardar SQLite histórico
+
+      - name: Guardar histórico SQLite de Twitch
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -65,7 +99,8 @@ jobs:
           path: state/geca_twitch.sqlite3
           if-no-files-found: warn
           retention-days: 30
-      - name: Guardar reportes CSV
+
+      - name: Guardar reportes diarios
         if: always()
         uses: actions/upload-artifact@v4
         with:
