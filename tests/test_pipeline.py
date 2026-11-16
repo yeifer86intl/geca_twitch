@@ -53,15 +53,14 @@ class PipelineTest(unittest.TestCase):
             asof=dt.date(2026,11,6)
             for dayindex in range(14):
                 day=asof-dt.timedelta(days=14-dayindex)
-                for hour in range(0,24,4):
-                    timestamp=f'{day.isoformat()}T{hour:02d}:17:00Z'
-                    cap=f'{dayindex}-{hour}'
-                    c.execute('INSERT INTO game_snapshots VALUES (?,?,?,?,?,?,?)',
-                        (cap,'g1',timestamp,1000 if dayindex<7 else 1700,10,1,'r'))
+                timestamp=f'{day.isoformat()}T12:17:00Z'
+                cap=f'{dayindex}-12'
+                c.execute('INSERT INTO game_snapshots VALUES (?,?,?,?,?,?,?)',
+                    (cap,'g1',timestamp,1000 if dayindex<7 else 1700,10,1,'r'))
             result=aggregate(c,asof)
             self.assertEqual(result['alerts'],1)
             self.assertEqual(result['games_evaluable'],1)
-            c.execute("DELETE FROM game_snapshots WHERE capture_id='3-4'")
+            c.execute("DELETE FROM game_snapshots WHERE capture_id='3-12'")
             self.assertEqual(aggregate(c,asof)['alerts'],0)
             c.close()
 

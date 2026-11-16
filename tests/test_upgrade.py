@@ -50,7 +50,7 @@ class UpgradeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             c=connect(Path(tmp)/'db.sqlite3')
             c.execute('''INSERT INTO steam_games VALUES (?,?,?,?,?,?,?,?,?)''',
-                      ('id1','Futuro','12 NOV 2026',0,0,0,'2026-11-07T12:00:00Z','{}','2026-11-09T12:00:00Z'))
+                      ('id1','Futuro','12 NOV 2026',0,0,0,'2026-11-07T12:00:00Z',json.dumps({'coming_soon':True,'ficha_estado':'ok'}),'2026-11-09T12:00:00Z'))
             self.assertEqual(len(get_launch_candidates(c,dt.date(2026,11,9))),1)
             result=aggregate(c,dt.date(2026,11,9))
             self.assertEqual(result['proposals'],1)

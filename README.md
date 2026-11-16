@@ -8,7 +8,7 @@ Proyecto de ingesta y métricas conforme al PDF **GECA / MediaPro – Radar / La
 
 1. **Identificar:** leer catálogo Steam; buscar coincidencias exactas en Helix y sugerir candidatos de similitud para revisión; almacenar categorías principales de Twitch incluso si no aparecen en Steam. IGDB ID se conserva cuando Twitch lo devuelve, pero NO se equipara automáticamente a un AppID de Steam.
 2. **Evidencia:** guardar snapshots por transmisión, por juego, videos, clips, observaciones de visualizaciones, timestamps y JSON fuente; conservar URLs del contenido sin descargarlo.
-3. **Reglas del PDF:** (a) Steam: próximo lanzamiento con ficha verificada dentro de 7 días; (b) Twitch: 14 días UTC completos, 6 franjas por día, captura de streams completa y audiencia previa >0; diferencia >=500 espectadores **y** >=50%.
+3. **Reglas del PDF:** (a) Steam: próximo lanzamiento con ficha verificada dentro de 7 días; (b) Twitch: 14 días UTC completos, 1 captura comparable por día, captura de streams completa y audiencia previa >0; diferencia >=500 espectadores **y** >=50%.
 4. **Resumen:** generar de 0 a 3 propuestas, priorizando señales Twitch y después lanzamientos Steam; este orden de desempate es una decisión técnica configurable, no un requisito del PDF.
 5. **Analista:** registrar manualmente `analizar`, `seguir`, `descartar`, `posponer` con fecha, nota y responsable.
 
@@ -89,7 +89,7 @@ El repositorio debe contener `.github/workflows/geca-twitch.yml` y ejecutarse de
 - 120 juegos se mantienen como cohorte estable y 30 rotan por defecto. Esos 30 no tendrán normalmente 14 días completos para activar alertas.
 - Los contadores de videos/clips se recuperan sujetos a límites y paginación; las cantidades no son un censo total de Twitch.
 - `avg_viewers` es un promedio de **snapshots observados**, no audiencia única, ni horas vistas exactas.
-- La regla de cobertura exige seis franjas distintas UTC por cada uno de 14 días. Un retraso de GitHub puede hacer un día no evaluable. La validez del alcance depende además de mantener los mismos límites de extracción y el mismo conjunto de juegos.
+- La regla de cobertura exige una captura diaria comparable a las 12:17 UTC por cada uno de 14 días. Un retraso de GitHub puede hacer un día no evaluable. La validez del alcance depende además de mantener los mismos límites de extracción y el mismo conjunto de juegos.
 - `attention_evaluations.reason` permite auditar `missing_day`, `incomplete_streams`, `missing_or_duplicate_slot`, `zero_previous_average`, `threshold_not_met`.
 - `editorial_proposals` genera hasta tres propuestas por ejecución, no rankings de popularidad. El estado `pending` se recalcula, pero decisiones previas se conservan.
 - El proyecto **no** descarga videos, no transcribe, no ejecuta LLM, no procesa mensajes de chat y no crea porcentajes positivos/negativos de Twitch.

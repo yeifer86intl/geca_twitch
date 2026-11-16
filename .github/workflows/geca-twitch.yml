@@ -1,8 +1,8 @@
-name: GECA Twitch - transaccional cada 4 horas
+name: GECA Twitch - extracción diaria
 
 on:
   schedule:
-    - cron: '17 */4 * * *' # UTC; Venezuela 20:17 (día anterior), 00:17, 04:17, 08:17, 12:17, 16:17
+    - cron: '17 12 * * *' # 12:17 UTC = 08:17 Venezuela (UTC-4)
   workflow_dispatch:
 
 permissions:
@@ -22,6 +22,7 @@ jobs:
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
       GH_TOKEN: ${{ github.token }}
       PYTHONPATH: src
+      STEAM_GH_TOKEN: ${{ secrets.STEAM_GH_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,9 +40,11 @@ jobs:
           python -c "import os,sys; sys.exit(0 if os.getenv('TWITCH_CLIENT_ID') and os.getenv('TWITCH_CLIENT_SECRET') else 1)"
       - name: Recuperar último SQLite
         run: python scripts/restore_latest_artifact.py
+      - name: Descargar maestro histórico actualizado de Steam
+        run: python scripts/download_steam_catalog.py --repo yeifer86intl/geca-radar --out data/geca_steam_historico.xlsx --csv data/steam_maestro_actual.csv
       - name: Ingesta transaccional Steam/Twitch
         run: |
-          STEAM_FILE="$(python scripts/select_steam_master.py)"
+          STEAM_FILE="data/steam_maestro_actual.csv"
           echo "Maestro seleccionado: $STEAM_FILE"
           python -m geca_twitch.ingest \
             --steam "$STEAM_FILE" \

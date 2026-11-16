@@ -14,3 +14,8 @@ venv/
 outputs/
 state/
 *.log
+
+# Maestro importado automáticamente desde Steam
+data/steam_maestro_actual.csv
+data/geca_steam_historico.xlsx
+data/downloaded_steam/

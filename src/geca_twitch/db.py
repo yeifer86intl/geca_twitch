@@ -86,6 +86,11 @@ CREATE TABLE IF NOT EXISTS editorial_proposals (
  evidence_json TEXT NOT NULL, question TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
  created_utc TEXT NOT NULL, PRIMARY KEY(proposal_day,game_key,rule)
 );
+CREATE TABLE IF NOT EXISTS geca_signals (
+ proposal_day TEXT NOT NULL, game_key TEXT NOT NULL, rule TEXT NOT NULL,
+ evidence_json TEXT NOT NULL, created_utc TEXT NOT NULL,
+ PRIMARY KEY (proposal_day,game_key,rule)
+);
 CREATE TABLE IF NOT EXISTS editorial_decisions (
  id INTEGER PRIMARY KEY AUTOINCREMENT, proposal_day TEXT NOT NULL,
  game_key TEXT NOT NULL, decision TEXT NOT NULL, note TEXT,
