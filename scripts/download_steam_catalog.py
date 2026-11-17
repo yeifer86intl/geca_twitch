@@ -93,12 +93,13 @@ def run(repo: str, out: str, result_csv: str):
                 continue  # Ejecución de otro workflow, o artifact no disponible.
 
             try:
-                sheet = pd.read_excel(
-                    book, sheet_name="vigente", dtype={"appid": str}
-                )
+                with pd.ExcelFile(book) as workbook:
+                    target_sheet = ("seguimiento_activo" if "seguimiento_activo" in workbook.sheet_names
+                                    else "seguimiento_6_meses")
+                    sheet = pd.read_excel(workbook, sheet_name=target_sheet, dtype={"appid": str})
             except (ValueError, KeyError) as exc:
                 raise RuntimeError(
-                    f"El artifact de la ejecución {run_id} no tiene una hoja 'vigente' válida."
+                    f"El artifact de la ejecución {run_id} no tiene una hoja de seguimiento válida."
                 ) from exc
             missing = REQUIRED.difference(sheet.columns)
             if missing:
@@ -117,7 +118,7 @@ def run(repo: str, out: str, result_csv: str):
             sheet[COLUMNS].to_csv(
                 target_csv, sep=";", index=False, encoding="utf-8-sig"
             )
-            print(f"Catálogo Steam importado: {len(sheet)} juegos. Run {run_id}.")
+            print(f"Catálogo Steam de seguimiento móvil importado: {len(sheet)} juegos. Run {run_id}.")
             return
 
     raise RuntimeError(
